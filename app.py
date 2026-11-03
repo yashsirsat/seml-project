@@ -10,17 +10,21 @@ import os
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Database configuration - Vercel/Neon aware
-# Fetch the Vercel/Neon database URL
 db_url = os.environ.get("DATABASE_URL")
 
-# SQLAlchemy requires the URL to start with 'postgresql://' but Neon provides 'postgres://'
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
-# Use the cloud database if found on Vercel, otherwise fallback to local SQLite for your computer
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'sqlite:///local_fallback.db'
+if db_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+elif os.environ.get("VERCEL"):
+    # Vercel's application directory is read-only; /tmp is writable but ephemeral.
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/local_fallback.db'
+else:
+    os.makedirs(app.instance_path, exist_ok=True)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///local_fallback.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -53,11 +57,13 @@ started_buses = set()  # Track buses that have been manually started by station 
 
 # ----------------- HELPER FUNCTIONS -----------------
 
+BUS_DATA_PATH = os.path.join(BASE_DIR, 'msrtc_bus_data_sample.csv')
+
 def get_unique_bus_data():
     bus_names = set()
     bus_types = set()
     bus_times = set()
-    with open('msrtc_bus_data_sample.csv', newline='', encoding='utf-8') as f:
+    with open(BUS_DATA_PATH, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             bus_names.add(row['bus_name'])
@@ -294,7 +300,7 @@ def booking():
             selected_name = request.form['bus_name']
             selected_type = request.form['bus_type']
             selected_time = request.form['bus_start_time']
-            with open('msrtc_bus_data_sample.csv', newline='', encoding='utf-8') as f:
+            with open(BUS_DATA_PATH, newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     if row['bus_name'] == selected_name and row['bus_type'] == selected_type and row['bus_start_time'] == selected_time:
@@ -332,7 +338,7 @@ def timetable():
         bus_name = request.form.get('bus_name')
         bus_type = request.form.get('bus_type')
         bus_start_time = request.form.get('bus_start_time')
-        with open('msrtc_bus_data_sample.csv', newline='', encoding='utf-8') as f:
+        with open(BUS_DATA_PATH, newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if ((not bus_name or row['bus_name'] == bus_name) and
@@ -340,7 +346,7 @@ def timetable():
                     (not bus_start_time or row['bus_start_time'] == bus_start_time)):
                     buses.append(row)
     else:
-        with open('msrtc_bus_data_sample.csv', newline='', encoding='utf-8') as f:
+        with open(BUS_DATA_PATH, newline='', encoding='utf-8') as f:
             buses = list(csv.DictReader(f))
     return render_template('timetable.html', bus_names=bus_names, bus_types=bus_types, bus_times=bus_times, buses=buses)
 
